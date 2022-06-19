@@ -1,0 +1,212 @@
+drop table csvtoparq;
+
+create table IF NOT EXISTS csvtoparq(acct_num string,bk_stat_cd string,sor_id int,relt_num int,cl_cd int,coll_cd int,dept_id int,stat_au_chan int,co_brand int)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as textfile
+tblproperties("skip.header.line.count"="1");
+
+load data local inpath "/home/gopalkrishna/tm_bk.csv" into table csvtoparq;
+
+select count(*) from csvtoparq;
+
+drop table parq;
+
+create table IF NOT EXISTS parq(acct_num string,bk_stat_cd string,sor_id int,relt_num int,cl_cd int,coll_cd int)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as parquet;
+
+insert overwrite table parq select * from csvtoparq;
+
+select count(*) from parq;
+
+drop table t_sor_lookup;
+
+create table t_sor_lookup(sor_id,sor_desc string)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as textfile
+tblproperties("skip.header.line.count"="1")
+
+
+till above hql file 
+
+hdfs dfs -get /user/hive/warehouse/parq/000000_0  /home/gopalkrishna/realtp/fde/parqfiles/
+
+cd /home/gopalkrishna/realtp/fde/parqfiles/
+
+mv 000000_0 fdeacct   -------Now we have aprquet file in hive/hdfs 
+
+
+-------------------------Hive to Spark integration ------------------
+
+cp $HADOOP_HOME/etc/hadoop/core-site.xml $SPARK_HOME/conf
+cp $HADOOP_HOME/etc/hadoop/hdfs-site.xml $SPARK_HOME/conf
+cp $HIVE_HOME/conf/hive-site.xml $SPARK_HOME/conf
+
+
+spark.sql("show databases").show()   --show database from hive
+spark.sql("show tables in batch125").show()
+
+df1 = spark.sql("select * from default.parq")
+
+df1.show()
++--------------------+----------+------+--------+-----+-------+
+|            acct_num|bk_stat_cd|sor_id|relt_num|cl_cd|coll_cd|
++--------------------+----------+------+--------+-----+-------+
+|56956912345678911...|         C|     4|       1|   76|   5000|
++--------------------+----------+------+--------+-----+-------+
+
+
+spark.sql("create table tabfromspark(id int, val string)")
+
+
+--------------RDBMS Integration to pyspark -------------------
+
+mysql -u root -p enter
+root
+
+show databases;
+
+use batch101;
+create table emp(empid int,deptid int,sal int,ename varchar(50));
+insert into emp values(1,100,1000,"Ravi");
+commt;
+select * from emp;
+
+spark.jars /home/gopalkrishna/INSTALL/spark-2.1.0-bin-hadoop2.6/Spark_Custom.jars/mysql-connector-java-5.1.38.jar 
+this must be present in /home/gopalkrishna/INSTALL/spark-2.1.0-bin-hadoop2.6/conf/soark-defaults.conf 
+--pyspark console 
+>>> jdbcDF = spark.read.format("jdbc").option("url","jdbc:mysql://localhost:3306/batch101").option("dbtable","batch101.emp").option("user","root").option("password","root").option("driver","com.mysql.jdbc.Driver").load()
+>>> jdbcDF.show()
++-----+------+----+-----+
+|empid|deptid| sal|ename|
++-----+------+----+-----+
+|    1|   100|1000| Ravi|
++-----+------+----+-----+
+
+--writting from df to rdbmc table always creates new table , if table already exists it throws error
+>>> jdbcDFWrite = jdbcDF.write.format("jdbc").option("url","jdbc:mysql://localhost:3306/batch101").option("dbtable","batch101.empspark").option("user","root") .option("password","root") .option("driver","com.mysql.jdbc.Driver") .save()
+
+>>> jdbcDFsp = spark.read.format("jdbc").option("url","jdbc:mysql://localhost:3306/batch101").option("dbtable","batch101.empspark").option("user","root").option("password","root").option("driver","com.mysql.jdbc.Driver").load()
+>>> jdbcDFsp.show()
++-----+------+----+-----+
+|empid|deptid| sal|ename|
++-----+------+----+-----+
+|    1|   100|1000| Ravi|
++-----+------+----+-----+
+
+
+write.mode("append")  ==> to append to the existing table 
+
+write.mode("overwrite") ==> to overwrite the existing table 
+
+
+-- Update one or few records to a file or table 
+
+Update single record from a 1 Million records file (/tmp/myfiles/emp.parquet)   (rdbms sql query : update emp set ename = 'Ravi' where emp_id = 7369;)
+
+df2 = spark.sql("select  emp_id,CASE when emp_id = 7369 THEN 'RAVI' else ename end as  ename,job,mgr,doj,sal,bonus,dept_id from emptemp")
+
+df2.write.mode("overwrite").format("csv").save("/tmp/myfiles/emp.parquet")
+ 
+
+spark.sql("select  emp_id,CASE when emp_id IN ( 7369,7934) THEN 'RAVI' else ename end as  ename,job,mgr,doj,sal,bonus,dept_id from emptemp").show()
+
+
+
+-- Insert into a file or table
+store the dfnewrecord in dfnew
+
+dfexst = dfexst.union(dfnew)
+
+or insert can also be achieved using dfins.write.mode("append").csv(
+
+SCDs ETL Example
+
+SCD1 : Overwire SC2 : Maintain both old and new records  SCD3 : maintain new column for old records SCD4 : maintain another table for historic data 
+
+set hive.support.concurrency = true;
+set hive.enforce.bucketing = true;
+set hive.exec.dynamic.partition.mode = nonstrict;
+set hive.txn.manager = org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
+set hive.compactor.initiator.on = true;
+set hive.compactor.worker.threads =1;
+SET hive.cli.print.header=true;
+SET hive.cli.print.current.db=true;
+
+
+drop table emptab;
+
+create table emptab(emp_id int,ename string,job string,mgr int,doj string,sal int,bonus int,dept_id  int)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as textfile;
+
+load data local inpath "/home/gopalkrishna/emp.csv" into table emptab;
+
+select count(*) from emptab;
+select * from emptab where mgr is NULL;
+select * from emptab where dept_id is null; -->expecting no records 
+
+pyspark : df1 = spark.sql("select * from emptab")
+
+SCD0  Truncate and reload table will be dropped in hive and reloaded with new data. 
+
+SCD1  : 
+	Case 1 : No date time stamp maintained in incoming files   --> First time full Load, from next day derive new and updated records accordingly update and insert main table.
+			 suppose emp2.csv on day 2 no timestamp column in file received.
+			 
+			 empday2.csv
+			 7934,MILLER,CLERK,7782,23-JAN-1982,2000,90,10  --. updated record Miller sal increased
+			 7876,ADAMS,CLERK,7788,12-JAN-1983,1600,100,20  --. updated record ADAMS sal increased
+			 7123,RAVI,CEO,\000,10-AUG-1990,1000000,10000,10    --> New Record
+			 
+			 there is empstage in hive where we receive day 2s file
+			 
+			 create table emptabstage(emp_id int,ename string,job string,mgr int,doj string,sal int,bonus int,dept_id  int)
+             row format delimited 
+             fields terminated by ','
+             lines terminated by '\n'
+             stored as textfile;
+			 
+             load data local inpath "/home/gopalkrishna/empday2.csv" into table emptabstage;
+             
+             
+             df = spark.sql(select * from emptab)
+             
+            load data local inpath "/home/gopalkrishna/empday2.csv" into table emptabstage;
+             
+			 df=spark.sql("select es.* from emptabstage es left outer join emptab e  on (e.emp_id = es.emp_id) where e.emp_id is null union (select es.* from emptabstage es inner join emptab e  on (e.emp_id = es.emp_id)) union select es.* from emptab e inner join emptabstage es  on (e.emp_id = es.emp_id) UNION select e.* from emptab es left outer join emptabstage e  on (e.emp_id = es.emp_id) where es.emp_id is null order by 1")  
+			
+			# in above inserts + common empid (includes updates as we are taking from staging ) + exclusively in emptab 
+			
+			df.createOrReplaceTempView("newdf")
+			
+			spark.sql("select count(distinct emp_id) from newdf").show()
+			
+			# this should be always equal or greater than before starting this process
+			
+			
+			df.write.mode("overwrite").saveAsTable("emptab")
+			#overwritten hive main table 
+			
+			
+			 
+	Case 2 : No date time stamp maintained in incoming files   --> First time full Load,  load old data as well andmaintain from and to columns in the table  to identify records
+	i.e end date record if we dont recevie in feed, if there is a change in an col end date and insert new record with new from date and null end date.
+	
+	
+			 
+create table emptabstage(emp_id int,ename string,job string,mgr int,doj string,sal int,bonus int,dept_id  int)
+row format delimited 
+fields terminated by ','
+lines terminated by '\n'
+stored as textfile;
+
+
